@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"
+                 xmlns:ns="spyne.workflow.soap">
+    <soap12:Header/>
+    <soap12:Body>
+        <ns:Response>
+            <custom_id>{{detectionId}}</custom_id>
+            <message>Your static response message here</message>
+        </ns:Response>
+    </soap12:Body>
+</soap12:Envelope>
