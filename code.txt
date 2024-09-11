@@ -1,0 +1,101 @@
+import json
+import requests
+import uuid
+import boto3
+
+# Define status types as an enum-like dictionary
+DETECTION_STATUS = {
+    "NEW": "New",
+    "INVESTIGATING": "Investigating",
+    "REAL_VIOLATION": "Real Violation",
+    "FALSE_POSITIVE": "False Positive"
+}
+
+# Initialize DynamoDB client
+dynamodb = boto3.resource('dynamodb')
+detection_table_name = "DetectionTable"  # Replace with your DynamoDB table name for detections
+config_table_name = "ConfigTable"  # Replace with your DynamoDB table name for config
+detection_table = dynamodb.Table(detection_table_name)
+config_table = dynamodb.Table(config_table_name)
+
+def lambda_handler(event, context):
+    print(event)
+    custom_id = str(uuid.uuid4())
+
+    # Fetch detection terms from DynamoDB config table
+    config = fetch_config_from_dynamodb()
+    false_positive_terms = config.get('FalsePositive', [])
+    real_violation_terms = config.get('RealViolation', [])
+
+    # Load the static SOAP response from a file
+    with open('stub/static_response.xml', 'r') as file:
+        response = file.read().replace("{{detectionId}}", custom_id)
+
+    # Determine the status based on the configurable detection terms
+    if any(term in event['body'] for term in false_positive_terms):
+        detection_type = DETECTION_STATUS["FALSE_POSITIVE"]
+    elif any(term in event['body'] for term in real_violation_terms):
+        detection_type = DETECTION_STATUS["REAL_VIOLATION"]
+    else:
+        detection_type = DETECTION_STATUS["NEW"]  # Default to "New" if no match
+
+    # Save detection information to DynamoDB
+    save_to_dynamodb(custom_id, detection_type)
+
+    return {
+        "statusCode": 200,
+        "body": response,
+        "headers": {
+            "Content-Type": "application/soap+xml"
+        }
+    }
+
+def fetch_config_from_dynamodb():
+    """Fetches configuration settings from DynamoDB."""
+    try:
+        # Fetch False Positive and Real Violation terms
+        false_positive_response = config_table.get_item(Key={'ConfigId': 'FalsePositive'})
+        real_violation_response = config_table.get_item(Key={'ConfigId': 'RealViolation'})
+
+        # Extract items from DynamoDB response
+        false_positive_terms = false_positive_response.get('Item', {}).get('Keywords', [])
+        real_violation_terms = real_violation_response.get('Item', {}).get('Keywords', [])
+
+        return {
+            'FalsePositive': false_positive_terms,
+            'RealViolation': real_violation_terms
+        }
+    except Exception as e:
+        print(f"Error fetching configuration from DynamoDB: {e}")
+        # Return default config if there is an error
+        return {
+            'FalsePositive': ['bomb accept', 'neglect', 'implicit'],
+            'RealViolation': ['bomb reject', 'accept', 'implt']
+        }
+
+def save_to_dynamodb(detection_id, detection_type):
+    """Saves the detection ID and status to DynamoDB."""
+    try:
+        detection_table.put_item(
+            Item={
+                'DetectionId': detection_id,
+                'Status': "Initiated",
+                'Type': detection_type
+            }
+        )
+        print(f"Detection {detection_id} saved with type {detection_type}.")
+    except Exception as e:
+        print(f"Error saving to DynamoDB: {e}")
+
+
+
+
+aws dynamodb put-item --table-name ConfigTable --item '{
+  "ConfigId": {"S": "FalsePositive"},
+  "Keywords": {"SS": ["bomb accept", "neglect", "implicit"]}
+}'
+
+aws dynamodb put-item --table-name ConfigTable --item '{
+  "ConfigId": {"S": "RealViolation"},
+  "Keywords": {"SS": ["bomb reject", "accept", "implt"]}
+}'
